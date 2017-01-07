@@ -272,7 +272,7 @@ final class fxmlTest extends FreeSpec with Matchers with Inside {
   }
 
   "read-only Map properties" in {
-    @fxml def button = {
+    @fxml val button = {
       <?import javafx.scene.control.*?>
       <Button>
         <properties foo="123" bar="456"/>
@@ -284,6 +284,19 @@ final class fxmlTest extends FreeSpec with Matchers with Inside {
     import scala.collection.JavaConverters._
     button.get.getProperties.asScala should be(Map("foo" -> "123", "bar" -> "456"))
 
+  }
+
+  "Location resolution" in {
+    import javafx.scene.image._
+    @fxml val imageView = {
+      <ImageView>
+        <image>
+          <Image url="@my_image.png"/>
+        </image>
+      </ImageView>
+    }
+    imageView.watch()
+    imageView.get.getImage should be(new Image(this.getClass.getResource("my_image.png").toString))
   }
 
   override protected def withFixture(test: NoArgTest): Outcome = {
