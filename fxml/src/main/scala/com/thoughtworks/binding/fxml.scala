@@ -445,8 +445,12 @@ object fxml {
 
     def buildJavaBean[Bean: WeakTypeTag](initializer: Tree): Tree = {
       val q"{ ${valDef: ValDef} => $seq(..$properties) }" = initializer
-      val name = valDef.name
-      val selfVal = atPos(valDef.pos)(q"val $name = ${c.prefix}.constructor()")
+//      val name = valDef.name
+
+      val selfVal =
+        c.internal.setSymbol(ValDef(NoMods, valDef.name, valDef.tpt, q"${c.prefix}.constructor()"), valDef.symbol)
+
+      val beanId = Ident(valDef.symbol) //treeCopy.Ident(valDef, valDef.name)
       val beanType = weakTypeOf[Bean]
       val beanClass = Class.forName(beanType.typeSymbol.fullName)
       val beanInfo = Introspector.getBeanInfo(beanClass)
@@ -461,10 +465,10 @@ object fxml {
                   c.error(property.pos, s"No default property found in ${beanInfo.getBeanDescriptor.getName}")
                   q"???"
                 case Some(descriptor) =>
-                  bindPropertyFromDescriptor(q"${name}", descriptor, values)
+                  bindPropertyFromDescriptor(beanId, descriptor, values)
               }
             case prefix :+ (lastProperty @ Literal(Constant(lastPropertyName: String))) =>
-              val (resolvedClass, resolvedInfo, resolvedBean) = resolve(beanClass, beanInfo, q"${name}", prefix)
+              val (resolvedClass, resolvedInfo, resolvedBean) = resolve(beanClass, beanInfo, beanId, prefix)
               if (classOf[java.util.Map[_, _]].isAssignableFrom(resolvedClass)) {
                 def put(binding: Tree) = {
                   map(binding) { value =>
@@ -503,11 +507,8 @@ object fxml {
         val allBindingUnits = attributeBindings.reduce { (left, right) =>
           q"_root_.com.thoughtworks.binding.fxml.Runtime.bindingUnitSemigroup.append($left, $right)"
         }
-        q"_root_.com.thoughtworks.binding.Binding.typeClass.map($allBindingUnits)({ _: _root_.scala.Unit => $name })"
+        q"_root_.com.thoughtworks.binding.Binding.typeClass.map($allBindingUnits)({ _: _root_.scala.Unit => $beanId })"
       }
-      println(binding)
-      println()
-      println()
       q"""
         $selfVal
         $binding
