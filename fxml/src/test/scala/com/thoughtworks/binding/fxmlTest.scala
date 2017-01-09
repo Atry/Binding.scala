@@ -27,6 +27,20 @@ final class fxmlTest extends FreeSpec with Matchers with Inside {
     observableArrayList.get.asScala should be(Seq("A", "B", "C"))
   }
 
+  "Reference by fx:id" in {
+    @fxml val button = {
+      import javafx.scene.layout.VBox
+      import javafx.scene.control.Button
+      <Button fx:id="b">
+        <text>{b.toString}</text>
+      </Button>
+    }
+
+    button.watch()
+    button.get.getText shouldNot be("")
+
+  }
+
   "fx:value with fx:id" in {
     @fxml val button = {
       import javafx.scene.layout.VBox
