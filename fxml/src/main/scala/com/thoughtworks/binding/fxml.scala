@@ -720,7 +720,8 @@ object fxml {
                       loop(
                         tail,
                         accumulatedDefinitions,
-                        accumulatedBindings.enqueue(super.transform(tree))
+                        accumulatedBindings.enqueue(
+                          q"_root_.com.thoughtworks.binding.Binding(${super.transform(tree)})")
                       )
 
                   }

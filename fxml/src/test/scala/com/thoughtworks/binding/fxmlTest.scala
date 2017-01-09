@@ -217,7 +217,7 @@ final class fxmlTest extends FreeSpec with Matchers with Inside {
       <?import javafx.scene.layout.VBox?>
       <VBox>
         <children>
-        {button}
+        {button.bind}
         </children>
       </VBox>
     }
