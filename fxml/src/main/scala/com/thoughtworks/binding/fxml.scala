@@ -1,4 +1,5 @@
-package com.thoughtworks.binding
+package com.thoughtworks
+package binding
 
 import java.beans.{BeanInfo, Introspector, PropertyDescriptor}
 import javafx.application.Platform
@@ -7,6 +8,7 @@ import javafx.fxml.JavaFXBuilderFactory
 import javafx.scene.image.Image
 import javax.swing.SwingUtilities
 
+import com.sun.javafx.fxml.builder.JavaFXImageBuilder
 import com.thoughtworks.binding.Binding.{BindingSeq, Constants, MultiMountPoint}
 import com.thoughtworks.sde.core.Preprocessor
 import macrocompat.bundle
@@ -19,6 +21,7 @@ import com.thoughtworks.Extractor._
 import com.thoughtworks.binding.XmlExtractor._
 
 import scala.collection.immutable.Queue
+import scalaz.{Monoid, Semigroup}
 
 /**
   * @author 杨博 (Yang Bo) &lt;pop.atry@gmail.com&gt;
@@ -32,29 +35,14 @@ object fxml {
 
   object Runtime {
 
-    private[Runtime] type ComponentOrComponentSeq = Any
-
-    private[Runtime] type RawValue = Any
-
-    @compileTimeOnly("For internal usage only")
-    final class Attributes(keyValuPairs: (String, RawValue)*)
-
-    @compileTimeOnly("For internal usage only")
-    final class DefaultProperties(children: ComponentOrComponentSeq*)
-
-    @compileTimeOnly("For internal usage only")
-    final class Property(name: String, attributes: Attributes, children: ComponentOrComponentSeq*)
-
-    @compileTimeOnly("For internal usage only")
-    final class Properties(properties: Property*)
-
-    final case class TypeCoercion(value: String) extends AnyVal
-
-    object TypeCoercion {
-      // TODO: implicit conversions from String to Int, Color, etc
+    val bindingUnitSemigroup: Semigroup[Binding[Unit]] = {
+      implicit val unitSemigroup: Semigroup[Unit] = Semigroup.instance { case _ => () }
+      Semigroup.liftSemigroup
     }
-
-    final class EmptyText(val value: String) extends AnyVal
+    val bindingStringSemigroup: Semigroup[Binding[String]] = {
+      import scalaz.std.string._
+      Semigroup.liftSemigroup
+    }
 
     final def toBindingSeqBinding[A](bindingSeqBinding: Binding[BindingSeq[A]]) = bindingSeqBinding
 
@@ -107,58 +95,63 @@ object fxml {
       def apply() = f()
     }
 
-    final class JavaMapBuilder[Key, Value](val self: java.util.Map[Key, Value])
-        extends Builder[java.util.Map[Key, Value]] {
-      // TODO: add map fields
+    final class JavaMapBuilder[Key, Value, M <: java.util.Map[Key, Value]](
+        implicit val constructor: EmptyConstructor[M])
+        extends Builder[M] {
+      def build(initializer: M => Seq[(Seq[String], Seq[Binding[_]])]): Binding[M] = {
+//        val map = constructor()
+//        val properties = initializer(map)
+//        for ((key, value) <- properties) yield {
+//          key match {
+//            case Seq()
+//          }
+//        }
+//        Binding.BindingInstances.sequence()
+        ??? // TODO: Replace this implementation to macro, so that we can raise an error if key is nested, and wipe out empty text
+
+      }
     }
 
-    final class JavaBeanBuilder[A](val self: A) extends Builder[A] {
-//
-//      def bindProperty(propertyName: String, namedValueMap: Map[String, Any], valueSeq: Seq[Any]): Unit =
-//        macro Macros.javaBeanBindProperty
-//
-//      def bindDefaultProperty(values: Any*): Unit = macro Macros.javaBeanBindDefaultProperty
+    final class JavaBeanBuilder[A](implicit val constructor: EmptyConstructor[A]) extends Builder[A] {
 
-      def build(attributes: Attributes,
-                properties: Properties,
-                defaultProperties: DefaultProperties,
-                fxId: String): Binding[A] =
-        macro Macros.javaBeanBuild[A]
+      def build(initializer: A => Seq[(Seq[String], Seq[Binding[_]])]): Binding[A] = macro Macros.buildJavaBean[A]
+//
+//      def build(attributes: Attributes,
+//                properties: Properties,
+//                defaultProperties: DefaultProperties,
+//                fxId: String): Binding[A] =
+//        macro Macros.buildJavaBean[A]
     }
 
-    trait NamedArgumentBuilder[A] extends Builder[A] {
-      final def build(attributes: Attributes,
-                      properties: Properties,
-                      defaultProperties: DefaultProperties,
-                      fxId: String): Binding[A] =
-        macro Macros.namedArgumentBuilder[A]
+    final class BuilderBuiler[A, B <: javafx.util.Builder[A]](implicit val constructor: EmptyConstructor[B])
+        extends Builder[A] {
+
+      def build(initializer: A => Seq[(Seq[String], Seq[Binding[_]])]): Binding[A] = ???
+//      def build(attributes: Attributes,
+//                properties: Properties,
+//                defaultProperties: DefaultProperties,
+//                fxId: String): Binding[A] =
+//        macro Macros.buildFromBuilder[A, B]
 
     }
 
     private[Runtime] sealed trait LowPriorityBuilder {
 
-      implicit final def javaBeanBuilder[A](implicit constructor: EmptyConstructor[A]): JavaBeanBuilder[A] = {
-        new JavaBeanBuilder[A](constructor())
+      implicit final def buildJavaBeaner[A](implicit constructor: EmptyConstructor[A]): JavaBeanBuilder[A] = {
+        new JavaBeanBuilder
       }
 
     }
 
     object Builder extends LowPriorityBuilder {
 
-      implicit object ImageBuilder extends NamedArgumentBuilder[Image] {
-        def buildFromNamedArguments(url: String = "",
-                                    requestedWidth: Double = 0,
-                                    requestedHeight: Double = 0,
-                                    preserveRatio: Boolean = false,
-                                    smooth: Boolean = false,
-                                    backgroundLoading: Boolean = false): Image = {
-          new Image(url, requestedWidth, requestedHeight, preserveRatio, smooth, backgroundLoading)
-        }
-      }
+      implicit def imageBuilder(
+          implicit constructor: EmptyConstructor[JavaFXImageBuilder]): BuilderBuiler[Image, JavaFXImageBuilder] =
+        new BuilderBuiler
 
       implicit def JavaMapBuilder[Key, Value, M <: java.util.Map[Key, Value]](
-          implicit constructor: EmptyConstructor[M]): JavaMapBuilder[Key, Value] = {
-        new JavaMapBuilder[Key, Value](constructor())
+          implicit constructor: EmptyConstructor[M]): JavaMapBuilder[Key, Value, M] = {
+        new JavaMapBuilder
       }
 
       def apply[Value](implicit builder: Builder[Value]): builder.type = builder
@@ -242,78 +235,111 @@ object fxml {
     import c.universe._
     import Macros._
 
+    private implicit def constantLiftable[A: Liftable]: Liftable[Binding.Constant[A]] =
+      new Liftable[Binding.Constant[A]] {
+        override def apply(value: Binding.Constant[A]): Tree = {
+          q"_root_.com.thoughtworks.binding.Binding.Constant(..${value.get})"
+        }
+      }
+    private implicit def seqLiftable[A: Liftable]: Liftable[Seq[A]] = new Liftable[Seq[A]] {
+      override def apply(value: Seq[A]): Tree = {
+        q"_root_.scala.Seq(..$value)"
+      }
+    }
+
+    private implicit def queueLiftable[A: Liftable]: Liftable[Queue[A]] = new Liftable[Queue[A]] {
+      override def apply(value: Queue[A]): Tree = {
+        q"_root_.scala.collection.immutable.Queue(..$value)"
+      }
+    }
+
+    private implicit def pairLiftable[A: Liftable, B: Liftable]: Liftable[(A, B)] = new Liftable[(A, B)] {
+      override def apply(value: (A, B)): Tree = {
+        q"(${value._1}, ${value._2})"
+      }
+    }
+
+    def emptyConstructor[A](implicit weakTypeTag: c.WeakTypeTag[A]): Tree = {
+      q"_root_.com.thoughtworks.binding.fxml.Runtime.EmptyConstructor(new ${weakTypeTag.tpe}())"
+    }
+
+    private object EmptyBinding {
+      private val ConstantSymbol = typeOf[Binding.Constant.type].termSymbol
+      def unapply(tree: Tree): Boolean = {
+        tree match {
+          case q"$c.apply[$stringType](${Literal(Constant(Macros.Spaces()))})"
+              if stringType.tpe <:< typeOf[String] && c.symbol == ConstantSymbol =>
+            true
+          case _ =>
+            false
+        }
+      }
+    }
+
+    private def map(binding: Tree)(f: Tree => Tree) = {
+      atPos(binding.pos) {
+        val valueName = TermName(c.freshName("value"))
+        q"""_root_.com.thoughtworks.binding.Binding.typeClass.map($binding)({ $valueName: ${TypeTree()} =>
+          ${f(atPos(binding.pos)(q"$valueName"))}
+        })"""
+      }
+    }
+
     private def bindPropertyFromDescriptor(parentBean: Tree,
                                            descriptor: PropertyDescriptor,
-                                           namedValues: Seq[(String, Tree)],
-                                           values: Seq[Tree]): Tree = {
-      def ensureNoNamedValue(): Unit = {
-        namedValues match {
-          case Seq() =>
-          case (_, headValue) +: _ =>
-            c.error(headValue.pos, "Only read-only map properties can contain attributes")
-        }
-      }
-      def ensureNoChildElements(): Unit = {
-        values match {
-          case Seq() =>
-          case Seq(emptyText) if emptyText.tpe <:< typeOf[Binding.Constant[EmptyText]] =>
-          case headValue +: _ =>
-            println(show(headValue.tpe))
-            c.error(headValue.pos, "Read-only map properties cannot contain child elements")
-        }
-      }
+                                           bindings: Seq[Tree]): Tree = {
+
       descriptor.getWriteMethod match {
-        case null if classOf[java.util.Map[_, _]].isAssignableFrom(descriptor.getPropertyType) =>
-          ensureNoChildElements()
-          val map = q"$parentBean.${TermName(descriptor.getReadMethod.getName)}"
-          q"""..${for ((key, value) <- namedValues) yield {
-            val mountPointName = TermName(c.freshName(s"${descriptor.getName}$$$key$$mountPoint"))
-            atPos(value.pos) {
-              q"""
-                val $mountPointName = _root_.com.thoughtworks.binding.Binding.apply[_root_.scala.Unit]($map.put($key, $value))
-                $mountPointName.bind
-              """
-            }
-          }}"""
         case null if classOf[java.util.List[_]].isAssignableFrom(descriptor.getPropertyType) =>
-          ensureNoNamedValue()
+          val nonEmptyBindings = bindings.filterNot(EmptyBinding.unapply)
           def list = q"$parentBean.${TermName(descriptor.getReadMethod.getName)}"
-          values match {
+          nonEmptyBindings match {
             case Seq() =>
-              q"()"
+              q"_root_.com.thoughtworks.binding.Binding.Constant(())"
             case Seq(name) =>
-              val mountPointName = TermName(c.freshName(s"${descriptor.getName}$$mountPoint"))
               q"""
-                val $mountPointName = new _root_.com.thoughtworks.binding.fxml.Runtime.JavaListMountPoint(
+                new _root_.com.thoughtworks.binding.fxml.Runtime.JavaListMountPoint(
                   $list
                 )(
                   _root_.com.thoughtworks.binding.fxml.Runtime.toBindingSeq($name)
                 )
-                $mountPointName.bind
               """
             case _ =>
-              val valueBindings = for (name <- values) yield {
+              val valueBindings = for (name <- nonEmptyBindings) yield {
                 q"_root_.com.thoughtworks.binding.fxml.Runtime.toBindingSeqBinding($name)"
               }
-              val mountPointName = TermName(c.freshName(s"${descriptor.getName}$$mountPoint"))
               q"""
-                val $mountPointName = new _root_.com.thoughtworks.binding.fxml.Runtime.JavaListMountPoint(
+                 new _root_.com.thoughtworks.binding.fxml.Runtime.JavaListMountPoint(
                   $list
                 )(
                   _root_.com.thoughtworks.binding.Binding.Constants(..$valueBindings).flatMapBinding(_root_.scala.Predef.locally _)
                 )
-                $mountPointName.bind
               """
           }
         case writeMethod =>
-          ensureNoNamedValue()
-          val Seq(value) = values
-          atPos(value.pos) {
-            if (value.tpe <:< typeOf[Binding.Constant[_]]) {
-              q"$parentBean.${TermName(writeMethod.getName)}($value.get)"
-            } else {
-              val monadicBody = q"$parentBean.${TermName(writeMethod.getName)}($value.bind)"
-              q"_root_.com.thoughtworks.binding.Binding[_root_.scala.Unit]($monadicBody).bind"
+          def mapSetter(binding: Tree) = {
+            map(binding) { value =>
+              q"$parentBean.${TermName(writeMethod.getName)}($value)"
+            }
+          }
+          if (classOf[String].isAssignableFrom(descriptor.getPropertyType)) {
+            bindings match {
+              case Seq() =>
+                q"""_root_.com.thoughtworks.binding.Binding.Constant(())"""
+              case Seq(value) =>
+                mapSetter(value)
+              case nonEmptyBindings =>
+                val value = nonEmptyBindings.reduce { (left, right) =>
+                  q"_root_.com.thoughtworks.binding.fxml.Runtime.bindingStringSemigroup.append($left, $right)"
+                }
+                mapSetter(value)
+            }
+          } else {
+            bindings.filterNot(EmptyBinding.unapply) match {
+              case Seq() =>
+                q"""_root_.com.thoughtworks.binding.Binding.Constant(())"""
+              case Seq(value) =>
+                mapSetter(value)
             }
           }
       }
@@ -323,188 +349,305 @@ object fxml {
       case q"new $t(..$arguments)" => arguments
       case q"new $t()" => Nil
     }
+//
+//    def buildFromBuilder[Out: WeakTypeTag, Builder: WeakTypeTag](attributes: Tree,
+//                                                                 properties: Tree,
+//                                                                 defaultProperties: Tree,
+//                                                                 fxId: Tree): Tree = {
+//      val beanClass = Class.forName(weakTypeOf[Builder].typeSymbol.fullName)
+//      val beanInfo = Introspector.getBeanInfo(beanClass)
+//      val beanType = weakTypeOf[Builder]
+//      val defaultPropertyValues = arguments(defaultProperties)
+//
+//      val bindDefaultProperties = findDefaultProperty(beanClass, beanInfo) match {
+//        case Some(descriptor) =>
+//          if (defaultPropertyValues.nonEmpty) {
+//            Seq(bindPropertyFromDescriptor(Ident(name), descriptor, Seq.empty, defaultPropertyValues))
+//          } else {
+//            Nil
+//          }
+//        case None =>
+//          defaultPropertyValues match {
+//            case Seq() =>
+//              Nil
+//            case Seq(emptyText) if emptyText.tpe <:< typeOf[Binding.Constant[EmptyText]] =>
+//              Nil
+//            case _ =>
+//              c.error(defaultProperties.pos, s"Default property for ${beanClass.getCanonicalName} is not found.")
+//              Nil
+//          }
+//      }
+//
+//      //      defaultPropertyValues match {
+////        case Seq() =>
+////        case Seq(emptyText) if emptyText.tpe <:< typeOf[Binding.Constant[EmptyText]] =>
+////        case _ =>
+////          c.error(defaultProperties.pos, s"${beanType} does not support default properties.")
+////      }
+//      val attributeParameters = arguments(attributes)
+//      val attributeBindings = for (a <- attributeParameters) yield {
+//        q"_root_.com.thoughtworks.binding.Binding($a)"
+//      }
+//      val propertyParameters = arguments(properties)
+//      val propertyBindings = for {
+//        q"""new $p(
+//          ${Literal(Constant(propertyNameString: String))},
+//          ${arguments.extract(nestedAttributes)},
+//          ..$nestedChildren
+//        )""" <- propertyParameters
+//      } yield {
+//// TODO:
+//      }
+//
+//      val totalNumberOfAttributesAndProperties = attributeBindings.length + propertyBindings.length
+//
+//      val applyN = TermName(s"apply$totalNumberOfAttributesAndProperties")
+//
+//      q"_root_.com.thoughtworks.binding.Binding.Constant(??? : ${weakTypeOf[Out]})"
+//    }
+//
 
-    def namedArgumentBuilder[Bean](attributes: Tree, properties: Tree, defaultProperties: Tree, fxId: Tree)(
-        implicit beanTypeTag: WeakTypeTag[Bean]): Tree = {
-      val beanClass = Class.forName(weakTypeOf[Bean].typeSymbol.fullName)
-      val beanType = weakTypeOf[Bean]
-      val defaultPropertyValues = arguments(defaultProperties)
-      defaultPropertyValues match {
-        case Seq() =>
-        case Seq(emptyText) if emptyText.tpe <:< typeOf[Binding.Constant[EmptyText]] =>
-        case _ =>
-          c.error(defaultProperties.pos, s"${beanType} does not support default properties.")
+    private def findDefaultProperty(beanClass: Class[_], beanInfo: BeanInfo): Option[PropertyDescriptor] = {
+      beanInfo.getDefaultPropertyIndex match {
+        case -1 =>
+          beanClass.getAnnotation(classOf[DefaultProperty]) match {
+            case null =>
+              None
+            case defaultProperty =>
+              beanInfo.getPropertyDescriptors.find(_.getName == defaultProperty.value)
+          }
+        case i =>
+          Some(beanInfo.getPropertyDescriptors.apply(i))
       }
-      val attributeParameters = arguments(attributes)
-      val attributeBindings = for (a <- attributeParameters) yield {
-        q"_root_.com.thoughtworks.binding.Binding($a)"
-      }
-      val propertyParameters = arguments(properties)
-      val propertyBindings = for {
-        q"""new $p(
-          ${Literal(Constant(propertyNameString: String))},
-          ${arguments.extract(nestedAttributes)},
-          ..$nestedChildren
-        )""" <- propertyParameters
-      } yield {
-
-      }
-
-      val totalNumberOfAttributesAndProperties = attributeBindings.length + propertyBindings.length
-
-      val applyN = TermName(s"apply$totalNumberOfAttributesAndProperties")
-
-      q"""
-        
-        _root_.com.thoughtworks.binding.Binding[$beanType] {
-          ${c.prefix.tree}.buildFromNamedArguments()
-        }
-      """
-
-      q"_root_.com.thoughtworks.binding.Binding.Constant.apply(${c.prefix.tree}.buildFromNamedArguments(???))" // TODO
     }
-    def javaBeanBuild[Bean](attributes: Tree, properties: Tree, defaultProperties: Tree, fxId: Tree)(
-        implicit beanTypeTag: WeakTypeTag[Bean]): Tree = {
-      val name = fxId match {
-        case Literal(Constant("")) => TermName(c.freshName("id"))
-        case Literal(Constant(id: String)) => TermName(id)
+
+    @tailrec
+    private def resolve(beanClass: Class[_],
+                        beanInfo: BeanInfo,
+                        bean: Tree,
+                        getters: Seq[Tree]): (Class[_], BeanInfo, Tree) = {
+      getters match {
+        case Seq() =>
+          (beanClass, beanInfo, bean)
+        case (head @ Literal(Constant(name: String))) +: tail =>
+          beanInfo.getPropertyDescriptors.find(_.getName == name) match {
+            case None =>
+              throw new TypecheckException(head.pos,
+                                           s"$name is not a property of ${beanInfo.getBeanDescriptor.getName}")
+            case Some(propertyDescriptor) =>
+              val nestedClass = propertyDescriptor.getPropertyType
+              val nestedInfo = Introspector.getBeanInfo(nestedClass)
+              val nestedBean = q"$bean.${TermName(propertyDescriptor.getReadMethod.getName)}"
+              resolve(nestedClass, nestedInfo, nestedBean, tail)
+          }
       }
+    }
+
+    def buildJavaBean[Bean: WeakTypeTag](initializer: Tree): Tree = {
+      val q"{ ${valDef: ValDef} => $seq(..$properties) }" = initializer
+      val name = valDef.name
+      val selfVal = atPos(valDef.pos)(q"val $name = ${c.prefix}.constructor()")
       val beanType = weakTypeOf[Bean]
       val beanClass = Class.forName(beanType.typeSymbol.fullName)
       val beanInfo = Introspector.getBeanInfo(beanClass)
-      val propertyParameters = arguments(properties)
 
-      // TODO: attributes
-
-      val bindProperties = for {
-        q"""new $p(
-          ${Literal(Constant(propertyNameString: String))},
-          ${arguments.extract(nestedAttributes)},
-          ..$nestedChildren
-        )""" <- propertyParameters
-      } yield {
-        val descriptorOption = beanInfo.getPropertyDescriptors.find(_.getName == propertyNameString)
-        descriptorOption match {
-          case None =>
-            c.error(p.pos, s"property $propertyNameString is not found")
-            q"???"
-          case Some(descriptor) =>
-            val namedValues = for (q"(${Literal(Constant(name: String))}, $value)" <- nestedAttributes) yield {
-              name -> value
-            }
-            bindPropertyFromDescriptor(Ident(name), descriptor, namedValues, nestedChildren)
-        }
-      }
-
-      def findDefaultProperty: Option[PropertyDescriptor] = {
-        beanInfo.getDefaultPropertyIndex match {
-          case -1 =>
-            beanClass.getAnnotation(classOf[DefaultProperty]) match {
-              case null =>
-                None
-              case defaultProperty =>
-                beanInfo.getPropertyDescriptors.find(_.getName == defaultProperty.value)
-            }
-          case i =>
-            Some(beanInfo.getPropertyDescriptors.apply(i))
-        }
-      }
-      val defaultPropertyValues = arguments(defaultProperties)
-
-      val bindDefaultProperties = findDefaultProperty match {
-        case Some(descriptor) =>
-          if (defaultPropertyValues.nonEmpty) {
-            Seq(bindPropertyFromDescriptor(Ident(name), descriptor, Seq.empty, defaultPropertyValues))
-          } else {
-            Nil
-          }
-        case None =>
-          defaultPropertyValues match {
+      val attributeBindings: Seq[Tree] = for (property @ q"($keySeq(..$keyPath), $valueSeq(..$values))" <- properties)
+        yield {
+          keyPath match {
             case Seq() =>
-              Nil
-            case Seq(emptyText) if emptyText.tpe <:< typeOf[Binding.Constant[EmptyText]] =>
-              Nil
-            case _ =>
-              c.error(defaultProperties.pos, s"Default property for ${beanClass.getCanonicalName} is not found.")
-              Nil
-          }
-      }
+              // Default properties
+              findDefaultProperty(beanClass, beanInfo) match {
+                case None =>
+                  c.error(property.pos, s"No default property found in ${beanInfo.getBeanDescriptor.getName}")
+                  q"???"
+                case Some(descriptor) =>
+                  bindPropertyFromDescriptor(q"${name}", descriptor, values)
+              }
+            case prefix :+ (lastProperty @ Literal(Constant(lastPropertyName: String))) =>
+              val (resolvedClass, resolvedInfo, resolvedBean) = resolve(beanClass, beanInfo, q"${name}", prefix)
+              if (classOf[java.util.Map[_, _]].isAssignableFrom(resolvedClass)) {
+                def put(binding: Tree) = {
+                  map(binding) { value =>
+                    q"$resolvedBean.put($lastPropertyName, $value)"
+                  }
+                }
+                values match {
+                  case Seq(value) =>
+                    put(value)
+                  case _ =>
+                    values.filterNot(EmptyBinding.unapply) match {
+                      case Seq(value) =>
+                        put(value)
+                      case _ =>
+                        c.error(lastProperty.pos, "An attribute for java.util.Map must have extractly one value.")
+                        q"???"
+                    }
+                }
 
-      q"""
-        _root_.com.thoughtworks.binding.Binding {
-          val $name = new $beanType
-          ..$bindProperties
-          ..$bindDefaultProperties
-          $name
+              } else {
+                resolvedInfo.getPropertyDescriptors.find(_.getName == lastPropertyName) match {
+                  case Some(descriptor) =>
+                    bindPropertyFromDescriptor(resolvedBean, descriptor, values)
+                  case None =>
+                    c.error(lastProperty.pos,
+                            s"$lastPropertyName is not a property of ${resolvedInfo.getBeanDescriptor.getName}")
+                    q"???"
+                }
+              }
+            // TODO: onChange
+          }
         }
+      val binding = if (attributeBindings.isEmpty) {
+        q"_root_.com.thoughtworks.binding.Binding.Constant(${valDef.name})"
+      } else {
+        val allBindingUnits = attributeBindings.reduce { (left, right) =>
+          q"_root_.com.thoughtworks.binding.fxml.Runtime.bindingUnitSemigroup.append($left, $right)"
+        }
+        q"_root_.com.thoughtworks.binding.Binding.typeClass.map($allBindingUnits)({ _: _root_.scala.Unit => $name })"
+      }
+      println(binding)
+      println()
+      println()
+      q"""
+        $selfVal
+        $binding
       """
     }
+//    def buildJavaBean[Bean](attributes: Tree, properties: Tree, defaultProperties: Tree, fxId: Tree)(
+//        implicit beanTypeTag: WeakTypeTag[Bean]): Tree = {
+//      val name = fxId match {
+//        case Literal(Constant("")) => TermName(c.freshName("id"))
+//        case Literal(Constant(id: String)) => TermName(id)
+//      }
+//      val beanType = weakTypeOf[Bean]
+//      val beanClass = Class.forName(beanType.typeSymbol.fullName)
+//      val beanInfo = Introspector.getBeanInfo(beanClass)
+//      val propertyParameters = arguments(properties)
+//
+//      // TODO: attributes
+//
+//      val bindProperties = for {
+//        q"""new $p(
+//          ${Literal(Constant(propertyNameString: String))},
+//          ${arguments.extract(nestedAttributes)},
+//          ..$nestedChildren
+//        )""" <- propertyParameters
+//      } yield {
+//        val descriptorOption = beanInfo.getPropertyDescriptors.find(_.getName == propertyNameString)
+//        descriptorOption match {
+//          case None =>
+//            c.error(p.pos, s"property $propertyNameString is not found")
+//            q"???"
+//          case Some(descriptor) =>
+//            val namedValues = for (q"(${Literal(Constant(name: String))}, $value)" <- nestedAttributes) yield {
+//              name -> value
+//            }
+//            bindPropertyFromDescriptor(Ident(name), descriptor, namedValues, nestedChildren)
+//        }
+//      }
+//
+//      val defaultPropertyValues = arguments(defaultProperties)
+//
+//      val bindDefaultProperties = findDefaultProperty(beanClass, beanInfo) match {
+//        case Some(descriptor) =>
+//          if (defaultPropertyValues.nonEmpty) {
+//            Seq(bindPropertyFromDescriptor(Ident(name), descriptor, Seq.empty, defaultPropertyValues))
+//          } else {
+//            Nil
+//          }
+//        case None =>
+//          defaultPropertyValues match {
+//            case Seq() =>
+//              Nil
+//            case Seq(emptyText) if emptyText.tpe <:< typeOf[Binding.Constant[EmptyText]] =>
+//              Nil
+//            case _ =>
+//              c.error(defaultProperties.pos, s"Default property for ${beanClass.getCanonicalName} is not found.")
+//              Nil
+//          }
+//      }
+//
+//      q"""
+//        _root_.com.thoughtworks.binding.Binding {
+//          val $name = new $beanType
+//          ..$bindProperties
+//          ..$bindDefaultProperties
+//          $name
+//        }
+//      """
+//    }
 
     def macroTransform(annottees: Tree*): Tree = {
       val transformer = new ComprehensionTransformer {
-        private def transformChildren(children: List[Tree]) = {
-          @tailrec
-          def loop(children: List[Tree],
-                   accumulatedDefinitions: Queue[Tree],
-                   accumulatedPropertyBindings: Queue[(String, Position, Seq[(String, Tree)], Seq[Tree])],
-                   accumulatedDefaultBindings: Queue[Tree])
-            : (Queue[Tree], Queue[(String, Position, Seq[(String, Tree)], Seq[Tree])], Queue[Tree]) = {
-            children match {
-              case Nil =>
-                (accumulatedDefinitions, accumulatedPropertyBindings, accumulatedDefaultBindings)
-              case head :: tail =>
-                head match {
-                  // TODO: other cases
-                  case transformImport.extract(transformedImport) =>
-                    loop(
-                      tail,
-                      accumulatedDefinitions.enqueue(transformedImport),
-                      accumulatedPropertyBindings,
-                      accumulatedDefaultBindings
-                    )
-                  case Text(Macros.Spaces()) =>
-                    loop(
-                      tail,
-                      accumulatedDefinitions,
-                      accumulatedPropertyBindings,
-                      accumulatedDefaultBindings
-                    )
-                  case transformNode.extract(defs, transformedValue) =>
-                    loop(
-                      tail,
-                      accumulatedDefinitions ++ defs,
-                      accumulatedPropertyBindings,
-                      accumulatedDefaultBindings.enqueue(transformedValue)
-                    )
-                  case tree @ Elem(UnprefixedName(propertyName),
-                                   attributes,
-                                   _,
-                                   transformNodeSeq.extract(defs, transformedValues))
-                      if propertyName.charAt(0).isLower =>
-                    val (attributeDefs, transformedAttributes) = transformAttributes(attributes)
-                    loop(
-                      tail,
-                      accumulatedDefinitions ++ attributeDefs ++ defs,
-                      accumulatedPropertyBindings.enqueue(
-                        (propertyName, tree.pos, transformedAttributes, transformedValues)),
-                      accumulatedDefaultBindings
-                    )
-                  case tree =>
-                    loop(
-                      tail,
-                      accumulatedDefinitions,
-                      accumulatedPropertyBindings,
-                      accumulatedDefaultBindings.enqueue(super.transform(tree))
-                    )
+        private def transformChildren(children: List[Tree], skipEmptyText: Boolean) = {
+          children match {
+            case Seq(tree @ Text(singleText)) =>
+              (Queue.empty, Queue.empty, Queue(atPos(tree.pos)(q"${Binding.Constant(singleText)}")))
+            case _ =>
+              @tailrec
+              def loop(children: List[Tree],
+                       accumulatedDefinitions: Queue[Tree],
+                       accumulatedPropertyBindings: Queue[(Seq[String], Position, Seq[Tree])],
+                       accumulatedDefaultBindings: Queue[Tree])
+                : (Queue[Tree], Queue[(Seq[String], Position, Seq[Tree])], Queue[Tree]) = {
+                children match {
+                  case Nil =>
+                    (accumulatedDefinitions, accumulatedPropertyBindings, accumulatedDefaultBindings)
+                  case head :: tail =>
+                    head match {
+                      // TODO: other cases
+                      case transformImport.extract(transformedImport) =>
+                        loop(
+                          tail,
+                          accumulatedDefinitions.enqueue(transformedImport),
+                          accumulatedPropertyBindings,
+                          accumulatedDefaultBindings
+                        )
+                      case Text(Macros.Spaces()) =>
+                        loop(
+                          tail,
+                          accumulatedDefinitions,
+                          accumulatedPropertyBindings,
+                          accumulatedDefaultBindings
+                        )
+                      case transformNode.extract(defs, transformedValue) =>
+                        loop(
+                          tail,
+                          accumulatedDefinitions ++ defs,
+                          accumulatedPropertyBindings,
+                          accumulatedDefaultBindings.enqueue(transformedValue)
+                        )
+                      case tree @ Elem(UnprefixedName(propertyName),
+                                       attributes,
+                                       _,
+                                       transformNodeSeq.extract(defs: Seq[Tree], transformedValues: Seq[Tree]))
+                          if propertyName.charAt(0).isLower =>
+                        val (attributeDefs: Queue[Tree], transformedAttributes: Seq[(Seq[String], Tree)]) =
+                          transformAttributes(attributes)
+                        val nestedAttrbutesBindings: Seq[(Seq[String], Position, Seq[Tree])] =
+                          for ((key, value) <- transformedAttributes) yield {
+                            (propertyName +: key, tree.pos, Seq(value))
+                          }
+                        loop(
+                          tail,
+                          accumulatedDefinitions ++ attributeDefs ++ defs,
+                          (accumulatedPropertyBindings ++ nestedAttrbutesBindings).enqueue(
+                            (Seq(propertyName), tree.pos, transformedValues)),
+                          accumulatedDefaultBindings
+                        )
+                      case tree =>
+                        loop(
+                          tail,
+                          accumulatedDefinitions,
+                          accumulatedPropertyBindings,
+                          accumulatedDefaultBindings.enqueue(
+                            q"_root_.com.thoughtworks.binding.Binding(${super.transform(tree)})")
+                        )
+                    }
                 }
-            }
+              }
+              loop(children, Queue.empty, Queue.empty, Queue.empty)
           }
-          loop(children, Queue.empty, Queue.empty, Queue.empty)
-        }
-
-        private def singleEmptyText(value: String) = {
-          val bindingName = TermName(c.freshName("emptyText"))
-          q"def $bindingName = _root_.com.thoughtworks.binding.Binding.Constant(new _root_.com.thoughtworks.binding.fxml.Runtime.EmptyText($value))" -> q"$bindingName"
         }
 
         private def transformImport: PartialFunction[Tree, Tree] = {
@@ -520,32 +663,17 @@ object fxml {
         private def transformAttributeValue(attributeValue: Tree): (Seq[Tree], Tree) = {
           attributeValue match {
             case TextAttribute(textValue) =>
-              textValue match {
-                case ExpressionBinding(code) =>
-                  c.parse(code)
-                  ???
-                case VariableResolution(code) =>
-                  c.parse(code)
-                  ???
-                case ResourceResolution(resource) =>
-                  ???
-                case LocationResolution(location) =>
-                  Nil -> atPos(attributeValue.pos)(q"""this.getClass.getResource($location).toString()""")
-                case EscapeSequences(rawText) =>
-                  Nil -> atPos(attributeValue.pos)(q"$rawText")
-                case _ =>
-                  Nil -> atPos(attributeValue.pos)(q"$textValue")
-              }
+              Nil -> atPos(attributeValue.pos)(q"${Binding.Constant(textValue)}")
             case _ =>
-              ???
+              Nil -> atPos(attributeValue.pos)(q"_root_.com.thoughtworks.binding.Binding($attributeValue)")
           }
         }
 
-        private def transformAttributes(attributes: List[(QName, Tree)]): (Queue[Tree], Seq[(String, Tree)]) = {
+        private def transformAttributes(attributes: List[(QName, Tree)]): (Queue[Tree], Queue[(Seq[String], Tree)]) = {
           @tailrec
           def loop(attributes: List[(QName, Tree)],
                    accumulatedDefinitions: Queue[Tree],
-                   accumulatedPairs: Queue[(String, Tree)]): (Queue[Tree], Queue[(String, Tree)]) = {
+                   accumulatedPairs: Queue[(Seq[String], Tree)]): (Queue[Tree], Queue[(Seq[String], Tree)]) = {
             attributes match {
               case Nil =>
                 (accumulatedDefinitions, accumulatedPairs)
@@ -556,9 +684,10 @@ object fxml {
                     loop(
                       tail,
                       accumulatedDefinitions ++ attributeDefinitions,
-                      accumulatedPairs.enqueue((attributeName, transformedAttributeValue))
+                      accumulatedPairs.enqueue((Seq(attributeName), transformedAttributeValue))
                     )
                   case _ =>
+                    // TODO: support prefixed attributes
                     c.error(value.pos, "attributes should not be prefixed")
                     loop(tail, accumulatedDefinitions, accumulatedPairs)
                 }
@@ -568,12 +697,8 @@ object fxml {
         }
 
         private def transformNodeSeq: PartialFunction[List[Tree], (Seq[Tree], Seq[Tree])] = {
-          case Seq() =>
-            val (defs, binding) = singleEmptyText("")
-            Seq(defs) -> Seq(binding)
-          case Seq(tree @ Text(singleText @ Macros.Spaces())) =>
-            val (defs, binding) = singleEmptyText(singleText)
-            Seq(defs) -> Seq(binding)
+          case Seq(tree @ Text(singleText)) =>
+            Nil -> Seq(atPos(tree.pos)(q"${Binding.Constant(singleText)}"))
           case children =>
             @tailrec
             def loop(nestedChildren: List[Tree],
@@ -585,10 +710,10 @@ object fxml {
                 case head :: tail =>
                   head match {
                     // TODO: other cases
-                    case transformImport.extract(transformedImport) =>
-                      loop(tail, accumulatedDefinitions.enqueue(transformedImport), accumulatedBindings)
                     case Text(Macros.Spaces()) =>
                       loop(tail, accumulatedDefinitions, accumulatedBindings)
+                    case transformImport.extract(transformedImport) =>
+                      loop(tail, accumulatedDefinitions.enqueue(transformedImport), accumulatedBindings)
                     case transformNode.extract(defs, transformedValue) =>
                       loop(tail, accumulatedDefinitions ++ defs, accumulatedBindings.enqueue(transformedValue))
                     case tree =>
@@ -655,45 +780,38 @@ object fxml {
                   case Some(id) =>
                     TermName(id)
                 }
-                val (childrenDefinitions, childrenProperties, defaultProperties) = transformChildren(children)
+                val (
+                  childrenDefinitions: Queue[Tree],
+                  childrenProperties: Queue[(Seq[String], Position, Seq[Tree])],
+                  defaultProperties: Queue[Tree]
+                ) = transformChildren(children, skipEmptyText = false)
                 val typeName = TypeName(className)
                 val (attributeDefs, attributesPairs) = transformAttributes(otherAttributes)
-                val attributesParameter = for {
-                  (name, value) <- attributesPairs
-                } yield {
-                  q"($name, $value)"
-                }
-                val propertiesParameter = for {
-                  (name, pos, subattributes, repeatedValues) <- childrenProperties
-                } yield {
-                  val attributesParameter = for {
-                    (name, value) <- subattributes
-                  } yield {
-                    q"($name, $value)"
+                val attributesParameter: Queue[Tree] = for ((key, value) <- attributesPairs) yield {
+                  atPos(value.pos) {
+                    q"""($key, ${Seq(value)})"""
                   }
+                }
+                val propertiesParameter: Seq[Tree] = for {
+                  (name, pos, values) <- childrenProperties
+                } yield {
                   atPos(pos) {
-                    q"""new _root_.com.thoughtworks.binding.fxml.Runtime.Property(
-                      $name,
-                      new _root_.com.thoughtworks.binding.fxml.Runtime.Attributes(..$attributesParameter),
-                      ..$repeatedValues
-                    )"""
+                    q"""($name, $values)"""
                   }
                 }
+                val build =
+                  (attributesParameter ++ propertiesParameter).enqueue(q"(${Seq.empty[String]}, $defaultProperties)")
                 val binding = atPos(tree.pos) {
                   val builderName = TermName(c.freshName("builder"))
+                  val f = fxIdOption match {
+                    case None =>
+                      q"{ _: $typeName => $build }"
+                    case Some(id) =>
+                      q"{ ${TermName(id)}: $typeName => $build }"
+                  }
                   q"""
                     val $builderName = _root_.com.thoughtworks.binding.fxml.Runtime.Builder[$typeName]
-                    $builderName.build(
-                      new _root_.com.thoughtworks.binding.fxml.Runtime.Attributes(..$attributesParameter),
-                      new _root_.com.thoughtworks.binding.fxml.Runtime.Properties(..$propertiesParameter),
-                      new _root_.com.thoughtworks.binding.fxml.Runtime.DefaultProperties(..$defaultProperties),
-                      ${fxIdOption match {
-                    case None =>
-                      q""" "" """
-                    case Some(id) =>
-                      q"$id"
-                  }}
-                    )
+                    $builderName.build($f)
                   """
                 }
                 fxIdOption match {
@@ -704,12 +822,15 @@ object fxml {
                     val bindingDef = atPos(tree.pos) {
                       q"val $bindingName = $binding"
                     }
+                    val macroName = TermName(c.freshName("AutoBind"))
                     val autoBindDef = atPos(tree.pos) {
-                      q"def $elementName: _root_.scala.Any = macro _root_.com.thoughtworks.binding.fxml.Runtime.autoBind"
+                      q"object $macroName { def $elementName: _root_.scala.Any = macro _root_.com.thoughtworks.binding.fxml.Runtime.autoBind }"
                     }
+                    val autoBindImport = q"import $macroName.$elementName"
                     (attributeDefs ++ childrenDefinitions)
                       .enqueue(bindingDef)
-                      .enqueue(autoBindDef) -> atPos(tree.pos) {
+                      .enqueue(autoBindDef)
+                      .enqueue(autoBindImport) -> atPos(tree.pos) {
                       q"$bindingName"
                     }
                 }
@@ -717,7 +838,7 @@ object fxml {
                 c.error(tree.pos, "fx:factory must not be empty.")
                 Nil -> q"???"
               case (Some(Text(fxFactory)), None) =>
-                transformChildren(children) match {
+                transformChildren(children, skipEmptyText = true) match {
                   case (childrenDefinitions, Queue(), defaultProperties) =>
                     val elementName = fxIdOption match {
                       case None =>
@@ -750,7 +871,7 @@ object fxml {
                       childrenDefinitions.enqueue(bindingDef)
                     }
                     defs -> atPos(tree.pos)(q"$bindingName")
-                  case (_, (_, pos, _, _) +: _, _) =>
+                  case (_, (_, pos, _) +: _, _) =>
                     c.error(pos, "fx:factory must not contain named property")
                     Nil -> q"???"
                 }
@@ -819,19 +940,16 @@ object fxml {
       }
 
       import transformer.transform
-      def transform(tree: Tree): Tree = {
-        val output = transformer.transform(tree)
-        c.info(c.enclosingPosition, show(output), true)
-        output
-      }
+//      def transform(tree: Tree): Tree = {
+//        val output = transformer.transform(tree)
+//        c.info(c.enclosingPosition, show(output), true)
+//        output
+//      }
 
       replaceDefBody(annottees, transform)
 
     }
 
-    def emptyConstructor[A](implicit weakTypeTag: c.WeakTypeTag[A]) = {
-      q"_root_.com.thoughtworks.binding.fxml.Runtime.EmptyConstructor(new ${weakTypeTag.tpe}())"
-    }
   }
 
 }

@@ -172,7 +172,7 @@ final class fxmlTest extends FreeSpec with Matchers with Inside {
 
       <?import javafx.scene.layout.VBox?>
       <VBox>
-        {button}
+        {button.bind}
       </VBox>
     }
 
@@ -185,7 +185,7 @@ final class fxmlTest extends FreeSpec with Matchers with Inside {
     }
   }
 
-  "Nested import and a bindable Button in default properties" in {
+  "Nested @fxml annotation" in {
     @fxml val vbox = {
       @fxml val button = {
         <?import javafx.scene.control.Button?>
