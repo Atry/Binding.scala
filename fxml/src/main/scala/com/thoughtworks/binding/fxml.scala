@@ -233,6 +233,8 @@ object fxml {
   private[binding] final class Macros(context: whitebox.Context) extends Preprocessor(context) with XmlExtractor {
 
     import c.universe._
+    import c.internal.decorators._
+
     import Macros._
 
     private implicit def constantLiftable[A: Liftable]: Liftable[Binding.Constant[A]] =
@@ -253,11 +255,11 @@ object fxml {
       }
     }
 
-    private implicit def pairLiftable[A: Liftable, B: Liftable]: Liftable[(A, B)] = new Liftable[(A, B)] {
-      override def apply(value: (A, B)): Tree = {
-        q"(${value._1}, ${value._2})"
-      }
+    private implicit def treeLiftable: Liftable[Tree] = new Liftable[Tree] {
+      override def apply(value: Tree): Tree = value
     }
+
+    private def lift[A](a: A)(implicit liftable: Liftable[A]) = liftable(a)
 
     def emptyConstructor[A](implicit weakTypeTag: c.WeakTypeTag[A]): Tree = {
       q"_root_.com.thoughtworks.binding.fxml.Runtime.EmptyConstructor(new ${weakTypeTag.tpe}())"
@@ -445,11 +447,7 @@ object fxml {
 
     def buildJavaBean[Bean: WeakTypeTag](initializer: Tree): Tree = {
       val q"{ ${valDef: ValDef} => $seq(..$properties) }" = initializer
-//      val name = valDef.name
-
-      val selfVal =
-        c.internal.setSymbol(ValDef(NoMods, valDef.name, valDef.tpt, q"${c.prefix}.constructor()"), valDef.symbol)
-
+      val selfVal = ValDef(NoMods, valDef.name, valDef.tpt, q"${c.prefix}.constructor()").setSymbol(valDef.symbol)
       val beanId = Ident(valDef.symbol) //treeCopy.Ident(valDef, valDef.name)
       val beanType = weakTypeOf[Bean]
       val beanClass = Class.forName(beanType.typeSymbol.fullName)
@@ -791,7 +789,7 @@ object fxml {
                 val (attributeDefs, attributesPairs) = transformAttributes(otherAttributes)
                 val attributesParameter: Queue[Tree] = for ((key, value) <- attributesPairs) yield {
                   atPos(value.pos) {
-                    q"""($key, ${Seq(value)})"""
+                    q"""($key, ${lift(Seq(value))})"""
                   }
                 }
                 val propertiesParameter: Seq[Tree] = for {
