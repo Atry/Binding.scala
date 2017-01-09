@@ -115,23 +115,14 @@ object fxml {
     final class JavaBeanBuilder[A](implicit val constructor: EmptyConstructor[A]) extends Builder[A] {
 
       def build(initializer: A => Seq[(Seq[String], Seq[Binding[_]])]): Binding[A] = macro Macros.buildJavaBean[A]
-//
-//      def build(attributes: Attributes,
-//                properties: Properties,
-//                defaultProperties: DefaultProperties,
-//                fxId: String): Binding[A] =
-//        macro Macros.buildJavaBean[A]
+
     }
 
     final class BuilderBuiler[A, B <: javafx.util.Builder[A]](implicit val constructor: EmptyConstructor[B])
         extends Builder[A] {
 
-      def build(initializer: A => Seq[(Seq[String], Seq[Binding[_]])]): Binding[A] = ???
-//      def build(attributes: Attributes,
-//                properties: Properties,
-//                defaultProperties: DefaultProperties,
-//                fxId: String): Binding[A] =
-//        macro Macros.buildFromBuilder[A, B]
+      def build(initializer: A => Seq[(Seq[String], Seq[Binding[_]])]): Binding[A] =
+        macro Macros.buildFromBuilder[A, B]
 
     }
 
@@ -351,64 +342,75 @@ object fxml {
       case q"new $t(..$arguments)" => arguments
       case q"new $t()" => Nil
     }
-//
-//    def buildFromBuilder[Out: WeakTypeTag, Builder: WeakTypeTag](attributes: Tree,
-//                                                                 properties: Tree,
-//                                                                 defaultProperties: Tree,
-//                                                                 fxId: Tree): Tree = {
-//      val beanClass = Class.forName(weakTypeOf[Builder].typeSymbol.fullName)
-//      val beanInfo = Introspector.getBeanInfo(beanClass)
-//      val beanType = weakTypeOf[Builder]
-//      val defaultPropertyValues = arguments(defaultProperties)
-//
-//      val bindDefaultProperties = findDefaultProperty(beanClass, beanInfo) match {
-//        case Some(descriptor) =>
-//          if (defaultPropertyValues.nonEmpty) {
-//            Seq(bindPropertyFromDescriptor(Ident(name), descriptor, Seq.empty, defaultPropertyValues))
-//          } else {
-//            Nil
-//          }
-//        case None =>
-//          defaultPropertyValues match {
-//            case Seq() =>
-//              Nil
-//            case Seq(emptyText) if emptyText.tpe <:< typeOf[Binding.Constant[EmptyText]] =>
-//              Nil
-//            case _ =>
-//              c.error(defaultProperties.pos, s"Default property for ${beanClass.getCanonicalName} is not found.")
-//              Nil
-//          }
-//      }
-//
-//      //      defaultPropertyValues match {
-////        case Seq() =>
-////        case Seq(emptyText) if emptyText.tpe <:< typeOf[Binding.Constant[EmptyText]] =>
-////        case _ =>
-////          c.error(defaultProperties.pos, s"${beanType} does not support default properties.")
-////      }
-//      val attributeParameters = arguments(attributes)
-//      val attributeBindings = for (a <- attributeParameters) yield {
-//        q"_root_.com.thoughtworks.binding.Binding($a)"
-//      }
-//      val propertyParameters = arguments(properties)
-//      val propertyBindings = for {
-//        q"""new $p(
-//          ${Literal(Constant(propertyNameString: String))},
-//          ${arguments.extract(nestedAttributes)},
-//          ..$nestedChildren
-//        )""" <- propertyParameters
-//      } yield {
-//// TODO:
-//      }
-//
-//      val totalNumberOfAttributesAndProperties = attributeBindings.length + propertyBindings.length
-//
-//      val applyN = TermName(s"apply$totalNumberOfAttributesAndProperties")
-//
-//      q"_root_.com.thoughtworks.binding.Binding.Constant(??? : ${weakTypeOf[Out]})"
-//    }
-//
 
+    def buildFromBuilder[Out: WeakTypeTag, Builder: WeakTypeTag](initializer: Tree): Tree = {
+
+      val q"{ ${valDef: ValDef} => $seq(..$properties) }" = initializer
+
+      val beanType = weakTypeOf[Builder]
+      val builderName = TermName(c.freshName("fxBuilder"))
+      val beanId = q"$builderName"
+      ???
+//      val binding = initializeJavaBean(beanId, beanType, properties)
+//
+//      q"""
+//        val $builderName = ${c.prefix}.constructor()
+//        _root_.com.thoughtworks.binding.Binding.typeClass.map($binding)({ $builderName: ${TypeTree()} =>
+//          $builderName.build()
+//        })
+//      """
+      //      val beanInfo = Introspector.getBeanInfo(beanClass)
+      //      val beanType = weakTypeOf[Builder]
+      //      val defaultPropertyValues = arguments(defaultProperties)
+      //
+      //      val bindDefaultProperties = findDefaultProperty(beanClass, beanInfo) match {
+      //        case Some(descriptor) =>
+      //          if (defaultPropertyValues.nonEmpty) {
+      //            Seq(bindPropertyFromDescriptor(Ident(name), descriptor, Seq.empty, defaultPropertyValues))
+      //          } else {
+      //            Nil
+      //          }
+      //        case None =>
+      //          defaultPropertyValues match {
+      //            case Seq() =>
+      //              Nil
+      //            case Seq(emptyText) if emptyText.tpe <:< typeOf[Binding.Constant[EmptyText]] =>
+      //              Nil
+      //            case _ =>
+      //              c.error(defaultProperties.pos, s"Default property for ${beanClass.getCanonicalName} is not found.")
+      //              Nil
+      //          }
+      //      }
+      //
+      //      //      defaultPropertyValues match {
+      ////        case Seq() =>
+      ////        case Seq(emptyText) if emptyText.tpe <:< typeOf[Binding.Constant[EmptyText]] =>
+      ////        case _ =>
+      ////          c.error(defaultProperties.pos, s"${beanType} does not support default properties.")
+      ////      }
+      //      val attributeParameters = arguments(attributes)
+      //      val attributeBindings = for (a <- attributeParameters) yield {
+      //        q"_root_.com.thoughtworks.binding.Binding($a)"
+      //      }
+      //      val propertyParameters = arguments(properties)
+      //      val propertyBindings = for {
+      //        q"""new $p(
+      //          ${Literal(Constant(propertyNameString: String))},
+      //          ${arguments.extract(nestedAttributes)},
+      //          ..$nestedChildren
+      //        )""" <- propertyParameters
+      //      } yield {
+      //// TODO:
+      //      }
+      //
+      //      val totalNumberOfAttributesAndProperties = attributeBindings.length + propertyBindings.length
+      //
+      //      val applyN = TermName(s"apply$totalNumberOfAttributesAndProperties")
+      //
+      //      q"_root_.com.thoughtworks.binding.Binding.Constant(??? : ${weakTypeOf[Out]})"
+      //    }
+      //
+    }
     private def findDefaultProperty(beanClass: Class[_], beanInfo: BeanInfo): Option[PropertyDescriptor] = {
       beanInfo.getDefaultPropertyIndex match {
         case -1 =>
@@ -445,136 +447,79 @@ object fxml {
       }
     }
 
-    def buildJavaBean[Bean: WeakTypeTag](initializer: Tree): Tree = {
-      val q"{ ${valDef: ValDef} => $seq(..$properties) }" = initializer
-      val selfVal = ValDef(NoMods, valDef.name, valDef.tpt, q"${c.prefix}.constructor()").setSymbol(valDef.symbol)
-      val beanId = Ident(valDef.symbol) //treeCopy.Ident(valDef, valDef.name)
-      val beanType = weakTypeOf[Bean]
-      val beanClass = Class.forName(beanType.typeSymbol.fullName)
-      val beanInfo = Introspector.getBeanInfo(beanClass)
+    private def initializeJavaBean(beanId: Tree, beanType: Type, properties: Seq[Tree]) = {
+      val attributeBindings: Seq[Tree] = {
+        val beanClass = Class.forName(beanType.typeSymbol.fullName)
+        val beanInfo = Introspector.getBeanInfo(beanClass)
+        for (property @ q"($keySeq(..$keyPath), $valueSeq(..$values))" <- properties)
+          yield {
+            keyPath match {
+              case Seq() =>
+                // Default properties
+                findDefaultProperty(beanClass, beanInfo) match {
+                  case None =>
+                    c.error(property.pos, s"No default property found in ${beanInfo.getBeanDescriptor.getName}")
+                    q"???"
+                  case Some(descriptor) =>
+                    bindPropertyFromDescriptor(beanId, descriptor, values)
+                }
+              case prefix :+ (lastProperty @ Literal(Constant(lastPropertyName: String))) =>
+                val (resolvedClass, resolvedInfo, resolvedBean) = resolve(beanClass, beanInfo, beanId, prefix)
+                if (classOf[java.util.Map[_, _]].isAssignableFrom(resolvedClass)) {
+                  def put(binding: Tree) = {
+                    map(binding) { value =>
+                      q"$resolvedBean.put($lastPropertyName, $value)"
+                    }
+                  }
+                  values match {
+                    case Seq(value) =>
+                      put(value)
+                    case _ =>
+                      values.filterNot(EmptyBinding.unapply) match {
+                        case Seq(value) =>
+                          put(value)
+                        case _ =>
+                          c.error(lastProperty.pos, "An attribute for java.util.Map must have extractly one value.")
+                          q"???"
+                      }
+                  }
 
-      val attributeBindings: Seq[Tree] = for (property @ q"($keySeq(..$keyPath), $valueSeq(..$values))" <- properties)
-        yield {
-          keyPath match {
-            case Seq() =>
-              // Default properties
-              findDefaultProperty(beanClass, beanInfo) match {
-                case None =>
-                  c.error(property.pos, s"No default property found in ${beanInfo.getBeanDescriptor.getName}")
-                  q"???"
-                case Some(descriptor) =>
-                  bindPropertyFromDescriptor(beanId, descriptor, values)
-              }
-            case prefix :+ (lastProperty @ Literal(Constant(lastPropertyName: String))) =>
-              val (resolvedClass, resolvedInfo, resolvedBean) = resolve(beanClass, beanInfo, beanId, prefix)
-              if (classOf[java.util.Map[_, _]].isAssignableFrom(resolvedClass)) {
-                def put(binding: Tree) = {
-                  map(binding) { value =>
-                    q"$resolvedBean.put($lastPropertyName, $value)"
+                } else {
+                  resolvedInfo.getPropertyDescriptors.find(_.getName == lastPropertyName) match {
+                    case Some(descriptor) =>
+                      bindPropertyFromDescriptor(resolvedBean, descriptor, values)
+                    case None =>
+                      c.error(lastProperty.pos,
+                              s"$lastPropertyName is not a property of ${resolvedInfo.getBeanDescriptor.getName}")
+                      q"???"
                   }
                 }
-                values match {
-                  case Seq(value) =>
-                    put(value)
-                  case _ =>
-                    values.filterNot(EmptyBinding.unapply) match {
-                      case Seq(value) =>
-                        put(value)
-                      case _ =>
-                        c.error(lastProperty.pos, "An attribute for java.util.Map must have extractly one value.")
-                        q"???"
-                    }
-                }
-
-              } else {
-                resolvedInfo.getPropertyDescriptors.find(_.getName == lastPropertyName) match {
-                  case Some(descriptor) =>
-                    bindPropertyFromDescriptor(resolvedBean, descriptor, values)
-                  case None =>
-                    c.error(lastProperty.pos,
-                            s"$lastPropertyName is not a property of ${resolvedInfo.getBeanDescriptor.getName}")
-                    q"???"
-                }
-              }
-            // TODO: onChange
+              // TODO: onChange
+            }
           }
-        }
-      val binding = if (attributeBindings.isEmpty) {
-        q"_root_.com.thoughtworks.binding.Binding.Constant(${valDef.name})"
+      }
+      if (attributeBindings.isEmpty) {
+        q"_root_.com.thoughtworks.binding.Binding.Constant($beanId)"
       } else {
         val allBindingUnits = attributeBindings.reduce { (left, right) =>
           q"_root_.com.thoughtworks.binding.fxml.Runtime.bindingUnitSemigroup.append($left, $right)"
         }
         q"_root_.com.thoughtworks.binding.Binding.typeClass.map($allBindingUnits)({ _: _root_.scala.Unit => $beanId })"
       }
+
+    }
+
+    def buildJavaBean[Bean: WeakTypeTag](initializer: Tree): Tree = {
+      val q"{ ${valDef: ValDef} => $seq(..$properties) }" = initializer
+
+      val beanId = Ident(valDef.symbol)
+      val beanType = weakTypeOf[Bean]
+      val binding = initializeJavaBean(beanId, beanType, properties)
       q"""
-        $selfVal
+        ${ValDef(NoMods, valDef.name, valDef.tpt, q"${c.prefix}.constructor()").setSymbol(valDef.symbol)}
         $binding
       """
     }
-//    def buildJavaBean[Bean](attributes: Tree, properties: Tree, defaultProperties: Tree, fxId: Tree)(
-//        implicit beanTypeTag: WeakTypeTag[Bean]): Tree = {
-//      val name = fxId match {
-//        case Literal(Constant("")) => TermName(c.freshName("id"))
-//        case Literal(Constant(id: String)) => TermName(id)
-//      }
-//      val beanType = weakTypeOf[Bean]
-//      val beanClass = Class.forName(beanType.typeSymbol.fullName)
-//      val beanInfo = Introspector.getBeanInfo(beanClass)
-//      val propertyParameters = arguments(properties)
-//
-//      // TODO: attributes
-//
-//      val bindProperties = for {
-//        q"""new $p(
-//          ${Literal(Constant(propertyNameString: String))},
-//          ${arguments.extract(nestedAttributes)},
-//          ..$nestedChildren
-//        )""" <- propertyParameters
-//      } yield {
-//        val descriptorOption = beanInfo.getPropertyDescriptors.find(_.getName == propertyNameString)
-//        descriptorOption match {
-//          case None =>
-//            c.error(p.pos, s"property $propertyNameString is not found")
-//            q"???"
-//          case Some(descriptor) =>
-//            val namedValues = for (q"(${Literal(Constant(name: String))}, $value)" <- nestedAttributes) yield {
-//              name -> value
-//            }
-//            bindPropertyFromDescriptor(Ident(name), descriptor, namedValues, nestedChildren)
-//        }
-//      }
-//
-//      val defaultPropertyValues = arguments(defaultProperties)
-//
-//      val bindDefaultProperties = findDefaultProperty(beanClass, beanInfo) match {
-//        case Some(descriptor) =>
-//          if (defaultPropertyValues.nonEmpty) {
-//            Seq(bindPropertyFromDescriptor(Ident(name), descriptor, Seq.empty, defaultPropertyValues))
-//          } else {
-//            Nil
-//          }
-//        case None =>
-//          defaultPropertyValues match {
-//            case Seq() =>
-//              Nil
-//            case Seq(emptyText) if emptyText.tpe <:< typeOf[Binding.Constant[EmptyText]] =>
-//              Nil
-//            case _ =>
-//              c.error(defaultProperties.pos, s"Default property for ${beanClass.getCanonicalName} is not found.")
-//              Nil
-//          }
-//      }
-//
-//      q"""
-//        _root_.com.thoughtworks.binding.Binding {
-//          val $name = new $beanType
-//          ..$bindProperties
-//          ..$bindDefaultProperties
-//          $name
-//        }
-//      """
-//    }
 
     def macroTransform(annottees: Tree*): Tree = {
       val transformer = new ComprehensionTransformer {
